@@ -1,0 +1,21 @@
+{
+  "name": "twitter_digest",
+  "version": "0.0.1",
+  "description": "Aggregates unique links from twitter search and produces RSS feed",
+  "main": "cli.js",
+  "bin": "./cli.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "twitter",
+    "rss"
+  ],
+  "author": "Michael Vigor <michael@bigbluedev.com>",
+  "license": "MIT",
+  "dependencies": {
+    "lodash": "^3.6.0",
+    "twitter": "^1.2.5",
+    "with-env": "^0.1.0"
+  }
+}
