@@ -7,7 +7,9 @@ var async = require('async');
 var Twitter = require('twitter');
 var _ = require('lodash');
 var mongojs = require('mongojs');
+var RSS = require('rss');
 var db = mongojs(process.env.MONGODB_URI, ['links', 'feed']);
+var knox = require('knox');
 
 process.setMaxListeners(0);
  
@@ -16,6 +18,13 @@ var client = new Twitter({
   consumer_secret: process.env.CONSUMER_SECRET,
   access_token_key: process.env.ACCESS_TOKEN_KEY,
   access_token_secret: process.env.ACCESS_TOKEN_SECRET
+});
+
+var s3 = knox.createClient({
+  key: process.env.S3_ACCESS_KEY,
+  secret: process.env.S3_SECRET_KEY,
+  bucket: process.env.S3_BUCKET,
+  region: 'eu-west-1'
 });
 
 function fetchTweetList(params, tweetsSoFar, cb){
@@ -37,7 +46,7 @@ function fetchTweetList(params, tweetsSoFar, cb){
                       function(err, doc){  })
     }
 
-    var searchFromTime = moment().subtract(2, 'hours');
+    var searchFromTime = moment().subtract(24, 'hours');
     var lastTweetTime = moment(_.last(tweets.statuses).created_at)
 
     if(tweets.search_metadata.next_results && (lastTweetTime > searchFromTime)){
@@ -130,7 +139,8 @@ function saveLinks(tweetsWithLinks, cb){
     return {linkId: t[0],
             fullLink: t[1][0],
             pageTitle: t[1][1],
-            statuses: t[1][2]}
+            statuses: t[1][2],
+            createdAt: moment().toISOString()}
   })
 
   async.each(docs, function(doc, callback){
@@ -146,6 +156,41 @@ function saveLinks(tweetsWithLinks, cb){
                       }
                       callback(err) })
   }, cb)
+}
+
+function createRssFeed(searchTerms, cb){
+  var feed = new RSS({title: "Twitter links digest for " + searchTerms,
+                     description: "Unique links from twitter search for " + searchTerms,
+                     feed_url: "",
+                     site_url: "http://search.twitter.com"});
+
+  db.links.find().sort({ '_id': -1 }).forEach(function(err, doc) {
+    if (!doc) {
+      var xml = feed.xml();
+      return cb(xml)
+    }
+    feed.item({title: doc.pageTitle,
+               description: doc.statuses.join("<br />"),
+               url: doc.fullLink,
+               guid: doc._id,
+               date: doc.createdAt});
+  })
+}
+
+function saveRssFeed(xml, cb){
+  var req = s3.put('/feed.xml', {
+    'Content-Length': Buffer.byteLength(xml),
+    'Content-Type': 'application/rss+xml',
+    'x-amz-acl': 'public-read'
+  });
+
+  req.on('response', function(res){
+    if (200 == res.statusCode) {
+      cb(req.url)
+    }
+  });
+
+  req.end(xml)
 }
 
 var searchTerms = process.argv.slice(2).join(" ");
@@ -166,7 +211,12 @@ db.feed.findOne({feedState: 'since_id'}, function(err, since){
       followTweetLinks(splitTweetLinks(list), function(results){
         console.log(_.keys(results).length + " links to save... ")
         saveLinks(results, function(err){
-          db.close()
+          createRssFeed(searchTerms, function(xml){
+            saveRssFeed(xml, function(url){
+              console.log("RSS created: " + url)
+              db.close()
+            })
+          })
         });
       })
     })
