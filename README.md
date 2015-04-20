@@ -1,6 +1,6 @@
 # Twitter Links to RSS feed generator
 
-This script will monitor a search term on twitter and produce an RSS feed of the unique links, using mongodb to save a copy of each link to prevent duplicates. It is designed to be run as an hourly scheduled task on heroku, and produces and RSS feed that is then stored on amazon S3. As there is no `web` process running it shouldn't incur any costs on heroku.
+This script will monitor a search term on twitter and produce an RSS feed of the unique links, using mongodb to save a copy of each link to prevent duplicates. It is designed to be run as an hourly scheduled task on heroku, and produces an RSS feed that is then stored on amazon S3. As there is no `web` process running it shouldn't incur any costs on heroku.
 
 ## Prerequisites
 
@@ -27,6 +27,7 @@ git push heroku master
 
 # Test everything is setup correctly
 heroku run node cli.js "your twitter search terms"
+#-> Once it is run it should print out the URL for the generated xml file, which you can add to your feed reader
 
 # Setup the scheduled task
 heroku addons:open scheduler
