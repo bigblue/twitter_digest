@@ -6,10 +6,11 @@ var url = require('url');
 var async = require('async');
 var Twitter = require('twitter');
 var _ = require('lodash');
-var mongojs = require('mongojs');
 var RSS = require('rss');
-var db = mongojs(process.env.MONGODB_URI, ['links', 'feed']);
 var knox = require('knox');
+var mongoose = require('mongoose');
+var mongo_url = process.env.MONGODB_URI ? process.env.MONGODB_URI : process.env.MONGOLAB_URI;
+mongoose.connect(mongo_url)
 
 process.setMaxListeners(0);
  
@@ -27,7 +28,7 @@ var s3 = knox.createClient({
   region: 'eu-west-1'
 });
 
-function fetchTweetList(params, tweetsSoFar, cb){
+function fetchTweetList(params, tweetsSoFar, collection, cb){
   console.log("Getting tweets from /search/tweets/json?" + qs.stringify(params))
   client.get('search/tweets', params, function(error, tweets, response){
     if(!tweets.statuses || tweets.statuses.length == 0){
@@ -37,7 +38,7 @@ function fetchTweetList(params, tweetsSoFar, cb){
     var statuses = _.pluck(_.filter(tweets.statuses, function(s){ return !s.retweeted_status }), 'text')
     var allTweets = tweetsSoFar.concat(statuses)
     if(!params.max_id){
-      db.feed.update({ feedState: 'since_id' },
+      collection.update({ feedState: 'since_id' },
                       {
                         feedState: 'since_id',
                         value: tweets.search_metadata.max_id_str
@@ -46,12 +47,12 @@ function fetchTweetList(params, tweetsSoFar, cb){
                       function(err, doc){  })
     }
 
-    var searchFromTime = moment().subtract(24, 'hours');
+    var searchFromTime = moment().subtract(2, 'hours');
     var lastTweetTime = moment(_.last(tweets.statuses).created_at)
 
     if(tweets.search_metadata.next_results && (lastTweetTime > searchFromTime)){
       var nextPageParams = qs.parse(tweets.search_metadata.next_results.replace(/^\?/, ""))
-      fetchTweetList(nextPageParams, allTweets, cb)
+      fetchTweetList(nextPageParams, allTweets, collection, cb)
     } else {
       cb(allTweets)
     }
@@ -130,11 +131,11 @@ function followTweetLinks(splitLinkTweets, complete){
   })
 }
 
-function setupDb(cb){
-  db.links.ensureIndex({linkId: 1}, {unique: true}, cb)
+function setupDb(collection, cb){
+  collection.ensureIndex({linkId: 1}, {unique: true}, cb)
 }
 
-function saveLinks(tweetsWithLinks, cb){
+function saveLinks(collection, tweetsWithLinks, cb){
   var docs = _.map(_.pairs(tweetsWithLinks), function(t){
     return {linkId: t[0],
             fullLink: t[1][0],
@@ -144,7 +145,7 @@ function saveLinks(tweetsWithLinks, cb){
   })
 
   async.each(docs, function(doc, callback){
-    db.links.update({ linkId: doc.linkId },
+    collection.update({ linkId: doc.linkId },
                     {
                       '$setOnInsert': _.omit(doc, 'statuses'),
                       '$addToSet': { statuses: { '$each': doc.statuses }}
@@ -158,22 +159,22 @@ function saveLinks(tweetsWithLinks, cb){
   }, cb)
 }
 
-function createRssFeed(searchTerms, cb){
+function createRssFeed(collection, searchTerms, cb){
   var feed = new RSS({title: "Twitter links digest for " + searchTerms,
                      description: "Unique links from twitter search for " + searchTerms,
                      feed_url: "",
                      site_url: "http://search.twitter.com"});
 
-  db.links.find().sort({ '_id': -1 }).forEach(function(err, doc) {
-    if (!doc) {
-      var xml = feed.xml();
-      return cb(xml)
-    }
-    feed.item({title: doc.pageTitle,
-               description: doc.statuses.join("<br />"),
-               url: doc.fullLink,
-               guid: doc._id,
-               date: doc.createdAt});
+  collection.find({}, { sort: [['_id', 'desc']] }).toArray(function(err, docs) {
+    docs.forEach(function(doc) {
+      feed.item({title: doc.pageTitle,
+                 description: doc.statuses,
+                 url: doc.fullLink,
+                 guid: doc._id,
+                 date: doc.createdAt});
+    })
+    var xml = feed.xml();
+    return cb(xml)
   })
 }
 
@@ -202,25 +203,35 @@ var params = {q: 'filter:links ' + searchTerms,
               include_entities: false
 }
 
-db.feed.findOne({feedState: 'since_id'}, function(err, since){
-  if (since) {
-    params['since_id'] = since.value
-  }
-  fetchTweetList(params, [], function(list){
-    setupDb(function(err, doc){
-      followTweetLinks(splitTweetLinks(list), function(results){
-        console.log(_.keys(results).length + " links to save... ")
-        saveLinks(results, function(err){
-          createRssFeed(searchTerms, function(xml){
-            saveRssFeed(xml, function(url){
-              console.log("RSS created: " + url)
-              db.close()
+
+var connection = mongoose.connection;
+connection.on('error', console.error.bind(console, 'connection error:'));
+connection.once('open', function (callback){
+  var db = connection.db;
+
+  var feed = db.collection('feed');
+  var links = db.collection('links');
+
+  feed.findOne({feedState: 'since_id'}, function(err, since){
+    if (since) {
+      params['since_id'] = since.value
+    }
+    fetchTweetList(params, [], feed, function(list){
+      setupDb(links, function(err, doc){
+        followTweetLinks(splitTweetLinks(list), function(results){
+          console.log(_.keys(results).length + " links to save... ")
+          saveLinks(links, results, function(err){
+            createRssFeed(links, searchTerms, function(xml){
+              saveRssFeed(xml, function(url){
+                console.log("RSS created: " + url)
+                db.close()
+              })
             })
-          })
-        });
+          });
+        })
       })
-    })
+    });
   });
-});
+})
 
 
