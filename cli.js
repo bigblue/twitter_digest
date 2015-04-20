@@ -47,7 +47,7 @@ function fetchTweetList(params, tweetsSoFar, collection, cb){
                       function(err, doc){  })
     }
 
-    var searchFromTime = moment().subtract(2, 'hours');
+    var searchFromTime = moment().subtract(24, 'hours');
     var lastTweetTime = moment(_.last(tweets.statuses).created_at)
 
     if(tweets.search_metadata.next_results && (lastTweetTime > searchFromTime)){
