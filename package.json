@@ -2,6 +2,7 @@
   "name": "twitter_digest",
   "version": "0.0.1",
   "description": "Aggregates unique links from twitter search and produces RSS feed",
+  "repository": "bigblue/twitter_digest",
   "main": "cli.js",
   "bin": "./cli.js",
   "scripts": {
