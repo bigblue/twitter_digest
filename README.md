@@ -27,7 +27,8 @@ git push heroku master
 
 # Test everything is setup correctly
 heroku run node cli.js "your twitter search terms"
-#-> Once it is run it should print out the URL for the generated xml file, which you can add to your feed reader
+#-> Once it is run it should print out the URL for the generated xml file, 
+#   which you can add to your feed reader
 
 # Setup the scheduled task
 heroku addons:open scheduler
